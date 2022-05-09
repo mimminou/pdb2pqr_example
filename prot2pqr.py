@@ -1,10 +1,11 @@
-from pdb2pqr import io, forcefield, hydrogens, debump
+from pdb2pqr import io, forcefield, hydrogens, debump, pdb
 import inspect
 from os.path import dirname
 from propka_script import run_propka
 from utility import setup_molecule, is_repairable,assign_titration_state, write_pqr
 from main_parser import build_main_parser
 from propka.lib import build_parser as propka_build_parser
+from io import StringIO
 
 ##? CONSTANTS :
 PDB_FILE = "4ey7.pdb"
@@ -12,28 +13,41 @@ PQR_OUTPUT = "test.pqr"
 PDB2PQ_DATA_DIR = dirname(inspect.getfile(forcefield)) + "/dat/" # FIELDS Default LOCATION, Might change depending on compilation problems
 PARSE = PDB2PQ_DATA_DIR + "PARSE.DAT"  #PARSE FIELD
 AMBER = PDB2PQ_DATA_DIR + "AMBER.DAT"  #AMBER FIELD
+CHARMM = PDB2PQ_DATA_DIR + "CHARMM.DAT"  #CHARMM FIELD
 PH = 7
 
 
 def generate_target_H (PDB_FILE, PQR_OUTPUT, force_field="PARSE", USE_PROPKA=False, PH=7):
     PARSER = build_main_parser()
     PARSER = propka_build_parser(PARSER)
-    args = PARSER.parse_args([PDB_FILE, PQR_OUTPUT])
+
+    if isinstance(PDB_FILE, StringIO):      # Try to circumvent ARG Parser to pass a StringIO() ... i hate this
+        mockPDB_FILE = "random stuff"
+        args = PARSER.parse_args([mockPDB_FILE, PQR_OUTPUT])
+        args.input_path = PDB_FILE
+    else:
+        args = PARSER.parse_args([PDB_FILE, PQR_OUTPUT])
     args.ff = force_field
     args.ph = PH
     
     if (USE_PROPKA):
         args.pka_method = "propka"          # add this to args if using propka as titration method
 
+    if isinstance(PDB_FILE, StringIO):
+        ## IF YOUR FILE IS A CIF FILE, THIS WONT WORK AND YOU HAVE TO CALL read_cif from cif module .... i didn't test that
+        pdb_file, errors = pdb.read_pdb(args.input_path)  #? USE THIS IF PASSING A STRING IO
+        is_cif = False
+    else:
+        pdb_file, is_cif = io.get_molecule(args.input_path)  #? PDB to open ( can NOT be a StringIO, ONLY TRUE PATHS)
 
-    pdb_file, is_cif = io.get_molecule(args.input_path)  #? PDB to open ( can NOT be a StringIO)
     bml, bmlDef, ligand = setup_molecule(pdb_file, io.get_definitions(), ligand_path= None) #! LIGAND IS NONE FOR TESTING ONLY
     
+    ffield = forcefield.Forcefield(force_field, bmlDef, PARSE) # first arg doesnt matter if 3rd arg exist
     #? use elif in case we add other force fields
-    if (force_field=="PARSE"):
-        ffield = forcefield.Forcefield(force_field, bmlDef, PARSE) # first arg doesnt matter if 3rd arg exist
-    elif (force_field=="AMBER"):
+    if (force_field=="AMBER"):
         ffield = forcefield.Forcefield(force_field, bmlDef, AMBER) # first arg doesnt matter if 3rd arg exist
+    elif(force_field=="CHARMM"):
+        ffield = forcefield.Forcefield(force_field, bmlDef, CHARMM)
     
     hydrogen_handler = hydrogens.create_handler()
     debumper = debump.Debump(bml)
